@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveAudioChunk } from "../services/indexedDbService";
+import { emitSystemLog } from "../services/systemEventLogger";
 
 const VAD_SILENCE_DURATION_MS = 4000;
 const DEFAULT_VAD_THRESHOLD = 0.025;
@@ -197,6 +198,7 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
       now - lastVoiceAtRef.current >= VAD_SILENCE_DURATION_MS
     ) {
       stopVad();
+      emitSystemLog("VAD");
       if (pauseForSilenceRef.current) {
         void pauseForSilenceRef.current();
       }

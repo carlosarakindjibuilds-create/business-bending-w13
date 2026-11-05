@@ -1,3 +1,5 @@
+import { emitSystemLog } from "./systemEventLogger";
+
 const DATABASE_NAME = "validator-of-the-trade";
 const DATABASE_VERSION = 1;
 const AUDIO_CHUNKS_STORE = "audioChunks";
@@ -123,7 +125,10 @@ export async function saveAudioChunk({
       return;
     }
 
-    transaction.oncomplete = () => resolve(id);
+    transaction.oncomplete = () => {
+      emitSystemLog("INDEXEDDB");
+      resolve(id);
+    };
     transaction.onerror = () => {
       reject(
         transaction.error || new Error("Falló la transacción de audio en IndexedDB.")

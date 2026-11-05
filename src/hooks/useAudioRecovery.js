@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { recoverPendingAudioSessions } from "../services/indexedDbService";
+import { emitSystemLog } from "../services/systemEventLogger";
 
 export function useAudioRecovery() {
   const [sessions, setSessions] = useState([]);
@@ -15,6 +16,9 @@ export function useAudioRecovery() {
       const recoveredSessions = await recoverPendingAudioSessions();
       if (mountedRef.current) {
         setSessions(recoveredSessions);
+        if (recoveredSessions.length > 0) {
+          emitSystemLog("APP_INIT");
+        }
       }
       return recoveredSessions;
     } catch (recoveryError) {
