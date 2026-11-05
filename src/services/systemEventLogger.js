@@ -14,6 +14,8 @@ const SYSTEM_LOG_MESSAGES = Object.freeze({
     "[EDGE_AI] Payload comprimido OGG/OPUS enviado a Cloudflare - Invocando Workers AI (Whisper).",
   API_SUCCESS:
     "[API_SUCCESS] JSON de confianza técnica estructurado por el LLM corporativo con éxito.",
+  SESSIONS_CLEARED:
+    "[INDEXEDDB] Sesiones anteriores eliminadas - Almacén de audio vaciado correctamente.",
 });
 
 export function emitSystemLog(type) {

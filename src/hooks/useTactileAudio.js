@@ -477,6 +477,11 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
     waitForRecorderStop,
   ]);
 
+  const clearAudioPreview = useCallback(() => {
+    previewPartsRef.current = [];
+    setLatestAudioBlob(null);
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
 
@@ -517,6 +522,7 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
 
   return {
     closeRecording,
+    clearAudioPreview,
     error,
     isPaused,
     isRecording,

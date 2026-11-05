@@ -3,11 +3,13 @@ import { createRoot } from "react-dom/client";
 import ConsoleLogger from "./components/ConsoleLogger.jsx";
 import { useAudioRecovery } from "./hooks/useAudioRecovery.js";
 import { useTactileAudio } from "./hooks/useTactileAudio.js";
+import { clearAudioChunks } from "./services/indexedDbService.js";
 import "./styles.css";
 
 function App() {
   const {
     closeRecording,
+    clearAudioPreview,
     error: audioError,
     isPaused,
     isRecording,
@@ -23,6 +25,7 @@ function App() {
   } = useAudioRecovery();
   const [actionError, setActionError] = useState(null);
   const [isActionPending, setIsActionPending] = useState(false);
+  const [isClearingSessions, setIsClearingSessions] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
 
   useEffect(() => {
@@ -57,6 +60,43 @@ function App() {
       );
     } finally {
       setIsActionPending(false);
+    }
+  };
+
+  const handleClearSessions = async () => {
+    if (
+      isRecording ||
+      isRecovering ||
+      isActionPending ||
+      isClearingSessions
+    ) {
+      return;
+    }
+
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Se eliminarán permanentemente todas las sesiones de audio guardadas en este dispositivo. ¿Deseas continuar?"
+      )
+    ) {
+      return;
+    }
+
+    setIsClearingSessions(true);
+    setActionError(null);
+    try {
+      if (sessionId) {
+        await closeRecording();
+      }
+      await clearAudioChunks();
+      clearAudioPreview();
+      await recover();
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "No se pudieron limpiar las sesiones."
+      );
+    } finally {
+      setIsClearingSessions(false);
     }
   };
 
@@ -103,6 +143,22 @@ function App() {
             : isActionPending
               ? "Procesando..."
               : buttonLabel}
+        </button>
+
+        <button
+          className="clear-sessions-button"
+          type="button"
+          onClick={handleClearSessions}
+          disabled={
+            isRecording ||
+            isRecovering ||
+            isActionPending ||
+            isClearingSessions
+          }
+        >
+          {isClearingSessions
+            ? "Limpiando sesiones..."
+            : "Limpiar Sesiones Anteriores"}
         </button>
 
         <div className="audio-preview">

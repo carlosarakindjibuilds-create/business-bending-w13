@@ -142,6 +142,39 @@ export async function saveAudioChunk({
   });
 }
 
+export async function clearAudioChunks() {
+  const database = await openAudioDatabase();
+
+  return new Promise((resolve, reject) => {
+    let transaction;
+
+    try {
+      transaction = database.transaction(AUDIO_CHUNKS_STORE, "readwrite");
+      transaction.objectStore(AUDIO_CHUNKS_STORE).clear();
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    transaction.oncomplete = () => {
+      emitSystemLog("SESSIONS_CLEARED");
+      resolve();
+    };
+    transaction.onerror = () => {
+      reject(
+        transaction.error ||
+          new Error("Falló la transacción al limpiar IndexedDB.")
+      );
+    };
+    transaction.onabort = () => {
+      reject(
+        transaction.error ||
+          new Error("Se abortó la transacción al limpiar IndexedDB.")
+      );
+    };
+  });
+}
+
 export function recoverPendingAudioSessions() {
   if (recoveryPromise) {
     return recoveryPromise;
