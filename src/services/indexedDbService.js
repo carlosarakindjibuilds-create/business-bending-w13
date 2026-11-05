@@ -3,6 +3,7 @@ const DATABASE_VERSION = 1;
 const AUDIO_CHUNKS_STORE = "audioChunks";
 
 let databasePromise;
+let recoveryPromise;
 
 export function openAudioDatabase() {
   if (typeof indexedDB === "undefined") {
@@ -133,5 +134,160 @@ export async function saveAudioChunk({
         transaction.error || new Error("Se abortó la transacción de audio en IndexedDB.")
       );
     };
+  });
+}
+
+export function recoverPendingAudioSessions() {
+  if (recoveryPromise) {
+    return recoveryPromise;
+  }
+
+  const pendingRecovery = scanPendingAudioSessions();
+  recoveryPromise = pendingRecovery;
+  const clearRecoveryPromise = () => {
+    if (recoveryPromise === pendingRecovery) {
+      recoveryPromise = undefined;
+    }
+  };
+  pendingRecovery.then(clearRecoveryPromise, clearRecoveryPromise);
+
+  return pendingRecovery;
+}
+
+async function scanPendingAudioSessions() {
+  const database = await openAudioDatabase();
+
+  return new Promise((resolve, reject) => {
+    let transaction;
+    let hasSettled = false;
+    let invalidRecord = false;
+    const chunks = [];
+
+    const fail = (error) => {
+      if (!hasSettled) {
+        hasSettled = true;
+        reject(error);
+      }
+    };
+
+    try {
+      transaction = database.transaction(AUDIO_CHUNKS_STORE, "readonly");
+      const store = transaction.objectStore(AUDIO_CHUNKS_STORE);
+      const statusIndex = store.index("by_status");
+      const range =
+        typeof IDBKeyRange !== "undefined"
+          ? IDBKeyRange.only("pending_upload")
+          : (() => {
+              throw new Error("IDBKeyRange no está disponible en este entorno.");
+            })();
+      const request = statusIndex.openCursor(range);
+
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor || hasSettled) {
+          return;
+        }
+
+        const chunk = cursor.value;
+        if (
+          !chunk ||
+          typeof chunk.id !== "string" ||
+          typeof chunk.sessionId !== "string" ||
+          !Number.isInteger(chunk.sequence) ||
+          chunk.sequence < 0 ||
+          typeof Blob === "undefined" ||
+          !(chunk.audio instanceof Blob) ||
+          chunk.audio.size === 0 ||
+          typeof chunk.mimeType !== "string" ||
+          !Number.isFinite(chunk.createdAt) ||
+          chunk.status !== "pending_upload"
+        ) {
+          invalidRecord = true;
+          transaction.abort();
+          fail(
+            new Error(
+              "Se encontró un fragmento pendiente inválido en IndexedDB; se conserva sin sincronizar."
+            )
+          );
+          return;
+        }
+
+        chunks.push(chunk);
+        cursor.continue();
+      };
+
+      request.onerror = () => {
+        fail(
+          request.error ||
+            new Error("No se pudieron leer los fragmentos pendientes de IndexedDB.")
+        );
+      };
+
+      transaction.oncomplete = () => {
+        if (hasSettled) {
+          return;
+        }
+
+        const sessions = new Map();
+        chunks.forEach((chunk) => {
+          let session = sessions.get(chunk.sessionId);
+          if (!session) {
+            session = {
+              sessionId: chunk.sessionId,
+              chunks: [],
+              status: "pending_upload",
+              recovered: true,
+              complete: false,
+              requiresReview: true,
+            };
+            sessions.set(chunk.sessionId, session);
+          }
+          session.chunks.push(chunk);
+        });
+
+        const recoveredSessions = Array.from(sessions.values());
+        recoveredSessions.forEach((session) => {
+          session.chunks.sort((left, right) => left.sequence - right.sequence);
+          for (let index = 1; index < session.chunks.length; index += 1) {
+            if (
+              session.chunks[index - 1].sequence ===
+              session.chunks[index].sequence
+            ) {
+              fail(
+                new Error(
+                  `La sesión ${session.sessionId} contiene fragmentos con secuencia duplicada.`
+                )
+              );
+              return;
+            }
+          }
+        });
+
+        if (!hasSettled) {
+          hasSettled = true;
+          resolve(recoveredSessions);
+        }
+      };
+
+      transaction.onerror = () => {
+        if (!invalidRecord) {
+          fail(
+            transaction.error ||
+              new Error("Falló la lectura de IndexedDB durante la recuperación.")
+          );
+        }
+      };
+
+      transaction.onabort = () => {
+        if (!invalidRecord) {
+          fail(
+            transaction.error ||
+              new Error("Se abortó la recuperación de IndexedDB.")
+          );
+        }
+      };
+    } catch (error) {
+      fail(error);
+    }
   });
 }
