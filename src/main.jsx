@@ -5,7 +5,7 @@ import { useAudioRecovery } from "./hooks/useAudioRecovery.js";
 import { useTactileAudio } from "./hooks/useTactileAudio.js";
 import {
   clearAudioChunks,
-  syncPendingAudioSession,
+  syncPendingAudioSessionToDrive,
 } from "./services/indexedDbService.js";
 import "./styles.css";
 
@@ -31,7 +31,7 @@ function App() {
   const [isActionPending, setIsActionPending] = useState(false);
   const [isClearingSessions, setIsClearingSessions] = useState(false);
   const [syncingSessionId, setSyncingSessionId] = useState(null);
-  const [syncedTranscripts, setSyncedTranscripts] = useState([]);
+  const [syncedDriveFiles, setSyncedDriveFiles] = useState([]);
   const [audioUrl, setAudioUrl] = useState(null);
 
   useEffect(() => {
@@ -122,7 +122,7 @@ function App() {
     const confirmed =
       typeof window === "undefined" ||
       window.confirm(
-        `Se enviarán ${recoveredSession.chunks.length} fragmentos guardados a Cloudflare para transcripción. Como la sesión fue recuperada, podría faltar audio que no alcanzó a guardarse. ¿Deseas continuar?`
+        `Se enviarán ${recoveredSession.chunks.length} fragmentos guardados a Google Drive. Como la sesión fue recuperada, podría faltar audio que no alcanzó a guardarse. ¿Deseas continuar?`
       );
     if (!confirmed) {
       return;
@@ -131,9 +131,11 @@ function App() {
     setSyncingSessionId(recoveredSession.sessionId);
     setActionError(null);
     try {
-      const result = await syncPendingAudioSession(recoveredSession.sessionId);
-      setSyncedTranscripts((current) => [
-        { sessionId: result.sessionId, transcript: result.transcript },
+      const result = await syncPendingAudioSessionToDrive(
+        recoveredSession.sessionId
+      );
+      setSyncedDriveFiles((current) => [
+        { sessionId: result.sessionId, fileId: result.fileId, fileName: result.fileName },
         ...current.filter((item) => item.sessionId !== result.sessionId),
       ]);
       await recover();
@@ -240,7 +242,7 @@ function App() {
               Se encontraron {recoveredSessions.length} sesión
               {recoveredSessions.length === 1 ? "" : "es"} pendiente
               {recoveredSessions.length === 1 ? "" : "s"}. No se enviará sin
-              tu confirmación. El envío inicia la transcripción en Cloudflare.
+              tu confirmación.
             </p>
             <ul className="recovered-session-list">
               {recoveredSessions.map((recoveredSession) => (
@@ -272,11 +274,14 @@ function App() {
           </section>
         )}
 
-        {syncedTranscripts.length > 0 && (
-          <section className="transcript-note" aria-live="polite">
-            <h2>Transcripción recibida</h2>
-            {syncedTranscripts.map((item) => (
-              <p key={item.sessionId}>{item.transcript}</p>
+        {syncedDriveFiles.length > 0 && (
+          <section className="drive-sync-note" aria-live="polite">
+            <h2>Audio guardado en Google Drive</h2>
+            {syncedDriveFiles.map((item) => (
+              <p key={item.sessionId}>
+                {item.fileName || `Archivo ${item.fileId}`} guardado
+                correctamente.
+              </p>
             ))}
           </section>
         )}

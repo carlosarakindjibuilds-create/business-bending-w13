@@ -224,19 +224,19 @@ h1 {
   opacity: 0.6;
 }
 
-.transcript-note {
+.drive-sync-note {
   margin-top: 20px;
   padding: 14px;
   background: #edf4e9;
   border-radius: 12px;
 }
 
-.transcript-note h2 {
+.drive-sync-note h2 {
   margin: 0;
   font-size: 1rem;
 }
 
-.transcript-note p {
+.drive-sync-note p {
   margin: 8px 0 0;
   line-height: 1.5;
   overflow-wrap: anywhere;

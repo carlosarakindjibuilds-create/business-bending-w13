@@ -4,7 +4,7 @@ const DATABASE_NAME = "validator-of-the-trade";
 const DATABASE_VERSION = 1;
 const AUDIO_CHUNKS_STORE = "audioChunks";
 const MAX_SYNC_AUDIO_BYTES = 8 * 1024 * 1024;
-const WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
+const DRIVE_SYNC_PROXY_URL = import.meta.env.VITE_GOOGLE_DRIVE_SCRIPT_URL;
 
 let databasePromise;
 let recoveryPromise;
@@ -177,24 +177,27 @@ export async function clearAudioChunks() {
   });
 }
 
-export async function syncPendingAudioSession(sessionId) {
+export async function syncPendingAudioSessionToDrive(sessionId) {
   if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
     throw new TypeError("Se requiere una sesión válida para sincronizar.");
   }
-  if (!WORKER_URL) {
+  if (!DRIVE_SYNC_PROXY_URL) {
     throw new Error(
-      "Falta configurar VITE_CLOUDFLARE_WORKER_URL para sincronizar audio."
+      "Falta configurar VITE_GOOGLE_DRIVE_SCRIPT_URL con la URL del proxy de Cloudflare."
     );
   }
 
   let endpoint;
   try {
-    endpoint = new URL(WORKER_URL);
+    endpoint = new URL(DRIVE_SYNC_PROXY_URL);
   } catch {
-    throw new Error("VITE_CLOUDFLARE_WORKER_URL no es una URL válida.");
+    throw new Error("VITE_GOOGLE_DRIVE_SCRIPT_URL no es una URL válida.");
   }
   if (endpoint.protocol !== "https:" && endpoint.hostname !== "localhost") {
     throw new Error("El endpoint de sincronización debe usar HTTPS.");
+  }
+  if (!endpoint.pathname.replace(/\/+$/, "").endsWith("/drive-sync")) {
+    endpoint.pathname = `${endpoint.pathname.replace(/\/+$/, "")}/drive-sync`;
   }
 
   const database = await openAudioDatabase();
@@ -215,42 +218,78 @@ export async function syncPendingAudioSession(sessionId) {
     throw new Error("La sesión contiene formatos de audio incompatibles.");
   }
 
-  const audio = new Blob(
-    chunks.map((chunk) => chunk.audio),
-    { type: mimeType }
-  );
+  const audio = new Blob(chunks.map((chunk) => chunk.audio), { type: mimeType });
   if (audio.size > MAX_SYNC_AUDIO_BYTES) {
-    throw new Error("La sesión excede el límite de 8 MiB del Cloudflare Worker.");
+    throw new Error("La sesión excede el límite de 8 MiB para sincronización.");
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": mimeType },
-    body: audio,
-    credentials: "omit",
-  });
+  const formData = new FormData();
+  formData.append("sessionId", sessionId);
+  formData.append("audio", audio, `${sessionId}.${getAudioExtension(mimeType)}`);
 
+  emitSystemLog("DRIVE_SYNC");
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+      credentials: "omit",
+    });
+  } catch {
+    throw new Error(
+      "No se pudo conectar con el proxy de Google Drive; la sesión sigue pendiente."
+    );
+  }
   if (!response.ok) {
-    throw new Error(`Cloudflare Worker respondió con HTTP ${response.status}.`);
+    throw new Error(
+      `El proxy de Google Drive respondió con HTTP ${response.status}; la sesión sigue pendiente.`
+    );
   }
-  emitSystemLog("EDGE_AI");
 
   let result;
   try {
     result = await response.json();
   } catch {
-    throw new Error("Cloudflare Worker devolvió una respuesta JSON inválida.");
+    throw new Error(
+      "El proxy de Google Drive devolvió una respuesta inválida; la sesión sigue pendiente."
+    );
   }
-  if (!result || typeof result.transcript !== "string" || !result.transcript.trim()) {
-    throw new Error("Cloudflare Worker no devolvió una transcripción válida.");
+  if (
+    !result ||
+    result.ok !== true ||
+    typeof result.fileId !== "string" ||
+    result.fileId.length === 0
+  ) {
+    throw new Error(
+      "Google Drive no confirmó el almacenamiento; la sesión sigue pendiente."
+    );
   }
 
   await markAudioChunksSynced(database, chunks);
   return {
     sessionId,
-    transcript: result.transcript,
-    wordCount: Number.isInteger(result.wordCount) ? result.wordCount : null,
+    fileId: result.fileId,
+    fileName: typeof result.fileName === "string" ? result.fileName : null,
+    size: Number.isFinite(result.size) ? result.size : audio.size,
   };
+}
+
+function getAudioExtension(mimeType) {
+  const normalizedType = mimeType.split(";")[0].trim().toLowerCase();
+  const extensions = {
+    "audio/ogg": "ogg",
+    "audio/opus": "opus",
+    "audio/webm": "webm",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+  };
+  const extension = extensions[normalizedType];
+  if (!extension) {
+    throw new Error("El formato de audio no es compatible con Google Drive.");
+  }
+  return extension;
 }
 
 function readPendingSessionChunks(database, sessionId) {

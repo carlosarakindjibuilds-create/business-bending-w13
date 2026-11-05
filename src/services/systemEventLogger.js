@@ -12,6 +12,7 @@ const SYSTEM_LOG_MESSAGES = Object.freeze({
     "[APP_INIT] Pestaña recuperada - Se encontraron fragmentos huérfanos en IndexedDB. Reanudando cola de sincronización.",
   EDGE_AI:
     "[EDGE_AI] Payload comprimido OGG/OPUS enviado a Cloudflare - Invocando Workers AI (Whisper).",
+  DRIVE_SYNC: "[DRIVE_SYNC] Sincronizando sesión con Google Drive...",
   API_SUCCESS:
     "[API_SUCCESS] JSON de confianza técnica estructurado por el LLM corporativo con éxito.",
   SESSIONS_CLEARED:
