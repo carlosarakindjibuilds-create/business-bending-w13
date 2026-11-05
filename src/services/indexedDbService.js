@@ -2,6 +2,8 @@ const DATABASE_NAME = "validator-of-the-trade";
 const DATABASE_VERSION = 1;
 const AUDIO_CHUNKS_STORE = "audioChunks";
 
+let databasePromise;
+
 export function openAudioDatabase() {
   if (typeof indexedDB === "undefined") {
     return Promise.reject(
@@ -9,7 +11,11 @@ export function openAudioDatabase() {
     );
   }
 
-  return new Promise((resolve, reject) => {
+  if (databasePromise) {
+    return databasePromise;
+  }
+
+  const pendingDatabase = new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     let settled = false;
 
@@ -45,7 +51,10 @@ export function openAudioDatabase() {
 
     request.onsuccess = () => {
       const database = request.result;
-      database.onversionchange = () => database.close();
+      database.onversionchange = () => {
+        database.close();
+        databasePromise = undefined;
+      };
 
       if (settled) {
         database.close();
@@ -54,6 +63,75 @@ export function openAudioDatabase() {
 
       settled = true;
       resolve(database);
+    };
+  });
+
+  databasePromise = pendingDatabase;
+  pendingDatabase.catch(() => {
+    if (databasePromise === pendingDatabase) {
+      databasePromise = undefined;
+    }
+  });
+
+  return pendingDatabase;
+}
+
+export async function saveAudioChunk({
+  id,
+  sessionId,
+  sequence,
+  audio,
+  mimeType,
+  createdAt = Date.now(),
+}) {
+  if (!id || !sessionId || !Number.isInteger(sequence) || sequence < 0) {
+    throw new TypeError("El fragmento requiere id, sessionId y sequence válidos.");
+  }
+  if (
+    typeof Blob === "undefined" ||
+    !(audio instanceof Blob) ||
+    audio.size === 0
+  ) {
+    throw new TypeError("El fragmento debe contener un Blob de audio no vacío.");
+  }
+  if (typeof mimeType !== "string" || mimeType.length === 0) {
+    throw new TypeError("El fragmento requiere un tipo MIME de audio válido.");
+  }
+  if (!Number.isFinite(createdAt)) {
+    throw new TypeError("createdAt debe ser una marca de tiempo válida.");
+  }
+
+  const database = await openAudioDatabase();
+
+  return new Promise((resolve, reject) => {
+    let transaction;
+
+    try {
+      transaction = database.transaction(AUDIO_CHUNKS_STORE, "readwrite");
+      transaction.objectStore(AUDIO_CHUNKS_STORE).put({
+        id,
+        sessionId,
+        sequence,
+        audio,
+        mimeType,
+        status: "pending_upload",
+        createdAt,
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    transaction.oncomplete = () => resolve(id);
+    transaction.onerror = () => {
+      reject(
+        transaction.error || new Error("Falló la transacción de audio en IndexedDB.")
+      );
+    };
+    transaction.onabort = () => {
+      reject(
+        transaction.error || new Error("Se abortó la transacción de audio en IndexedDB.")
+      );
     };
   });
 }
