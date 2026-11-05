@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from "react-dom/client";
 import ConsoleLogger from "./components/ConsoleLogger.jsx";
 import { useAudioRecovery } from "./hooks/useAudioRecovery.js";
@@ -11,6 +11,7 @@ function App() {
     error: audioError,
     isPaused,
     isRecording,
+    latestAudioBlob,
     resumeRecording,
     sessionId,
     startRecording,
@@ -22,6 +23,18 @@ function App() {
   } = useAudioRecovery();
   const [actionError, setActionError] = useState(null);
   const [isActionPending, setIsActionPending] = useState(false);
+  const [audioUrl, setAudioUrl] = useState(null);
+
+  useEffect(() => {
+    if (!latestAudioBlob) {
+      setAudioUrl(null);
+      return undefined;
+    }
+
+    const objectUrl = URL.createObjectURL(latestAudioBlob);
+    setAudioUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [latestAudioBlob]);
 
   const handleAudioAction = async () => {
     if (isActionPending) {
@@ -91,6 +104,23 @@ function App() {
               ? "Procesando..."
               : buttonLabel}
         </button>
+
+        <div className="audio-preview">
+              <label htmlFor="audio-preview">Último audio capturado</label>
+              <audio
+                id="audio-preview"
+                controls
+                preload="metadata"
+                src={audioUrl || undefined}
+              >
+                Tu navegador no admite la reproducción de audio.
+              </audio>
+              {!latestAudioBlob && (
+                <p className="audio-preview-note">
+                  El audio estará disponible aquí mientras grabas.
+                </p>
+              )}
+        </div>
 
         {sessionId && (
           <p className="session-note">

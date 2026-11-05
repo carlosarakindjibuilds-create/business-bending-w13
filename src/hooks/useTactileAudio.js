@@ -48,6 +48,7 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
   const [isPaused, setIsPaused] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [error, setError] = useState(null);
+  const [latestAudioBlob, setLatestAudioBlob] = useState(null);
 
   const mountedRef = useRef(false);
   const startingRef = useRef(false);
@@ -58,6 +59,7 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
   const sequenceRef = useRef(0);
   const persistenceQueueRef = useRef(Promise.resolve());
   const persistenceErrorRef = useRef(null);
+  const previewPartsRef = useRef([]);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -332,12 +334,24 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
           sequenceRef.current = 0;
           persistenceQueueRef.current = Promise.resolve();
           persistenceErrorRef.current = null;
+          previewPartsRef.current = [];
+          setLatestAudioBlob(null);
           setSessionId(sessionIdRef.current);
         }
 
         const activeSessionId = sessionIdRef.current;
+        previewPartsRef.current = [];
         recorder.addEventListener("dataavailable", (event) => {
           if (event.data && event.data.size > 0) {
+            previewPartsRef.current.push(event.data);
+            if (mountedRef.current) {
+              setLatestAudioBlob(
+                new Blob(previewPartsRef.current, {
+                  type: recorder.mimeType || event.data.type,
+                })
+              );
+            }
+
             const sequence = sequenceRef.current;
             sequenceRef.current += 1;
             enqueueAudioChunk(
@@ -506,6 +520,7 @@ export function useTactileAudio({ silenceThreshold = DEFAULT_VAD_THRESHOLD } = {
     error,
     isPaused,
     isRecording,
+    latestAudioBlob,
     resumeRecording,
     sessionId,
     startRecording,

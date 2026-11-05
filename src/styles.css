@@ -110,6 +110,28 @@ h1 {
   opacity: 0.7;
 }
 
+.audio-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.audio-preview label {
+  color: #3e493a;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.audio-preview audio {
+  width: 100%;
+}
+
+.audio-preview-note {
+  margin: 0;
+  color: #5f665c;
+  font-size: 0.85rem;
+}
+
 .session-note,
 .recovery-note p {
   color: #5f665c;
