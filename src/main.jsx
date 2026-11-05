@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import ConsoleLogger from "./components/ConsoleLogger";
-import { useAudioRecovery } from "./hooks/useAudioRecovery";
-import { useTactileAudio } from "./hooks/useTactileAudio";
+import ConsoleLogger from "./components/ConsoleLogger.jsx";
+import { useAudioRecovery } from "./hooks/useAudioRecovery.js";
+import { useTactileAudio } from "./hooks/useTactileAudio.js";
 import "./styles.css";
 
 function App() {
@@ -121,4 +121,9 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+const rootElement = document.getElementById("root");
+if (!rootElement) {
+  throw new Error('No se encontró el elemento raíz "#root" en index.html.');
+}
+
+createRoot(rootElement).render(<App />);
