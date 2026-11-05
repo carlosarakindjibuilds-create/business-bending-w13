@@ -182,6 +182,66 @@ h1 {
   margin: 8px 0 0;
 }
 
+.recovered-session-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recovered-session-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e6dfc9;
+}
+
+.sync-session-button {
+  min-height: 42px;
+  padding: 8px 12px;
+  color: #fff;
+  background: #527b35;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.sync-session-button:hover:not(:disabled) {
+  background: #3e6028;
+}
+
+.sync-session-button:focus-visible {
+  outline: 3px solid #d3a43e;
+  outline-offset: 3px;
+}
+
+.sync-session-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.transcript-note {
+  margin-top: 20px;
+  padding: 14px;
+  background: #edf4e9;
+  border-radius: 12px;
+}
+
+.transcript-note h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.transcript-note p {
+  margin: 8px 0 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .error-message {
   margin: 18px 0 0;
   padding: 12px;

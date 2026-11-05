@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import ConsoleLogger from "./components/ConsoleLogger.jsx";
 import { useAudioRecovery } from "./hooks/useAudioRecovery.js";
 import { useTactileAudio } from "./hooks/useTactileAudio.js";
-import { clearAudioChunks } from "./services/indexedDbService.js";
+import {
+  clearAudioChunks,
+  syncPendingAudioSession,
+} from "./services/indexedDbService.js";
 import "./styles.css";
 
 function App() {
@@ -21,11 +24,14 @@ function App() {
   const {
     error: recoveryError,
     isLoading: isRecovering,
+    recover,
     sessions: recoveredSessions,
   } = useAudioRecovery();
   const [actionError, setActionError] = useState(null);
   const [isActionPending, setIsActionPending] = useState(false);
   const [isClearingSessions, setIsClearingSessions] = useState(false);
+  const [syncingSessionId, setSyncingSessionId] = useState(null);
+  const [syncedTranscripts, setSyncedTranscripts] = useState([]);
   const [audioUrl, setAudioUrl] = useState(null);
 
   useEffect(() => {
@@ -49,6 +55,7 @@ function App() {
     try {
       if (isRecording) {
         await closeRecording();
+        await recover();
       } else if (sessionId) {
         await resumeRecording();
       } else {
@@ -68,7 +75,8 @@ function App() {
       isRecording ||
       isRecovering ||
       isActionPending ||
-      isClearingSessions
+      isClearingSessions ||
+      syncingSessionId
     ) {
       return;
     }
@@ -97,6 +105,46 @@ function App() {
       );
     } finally {
       setIsClearingSessions(false);
+    }
+  };
+
+  const handleSyncSession = async (recoveredSession) => {
+    if (
+      isRecording ||
+      isRecovering ||
+      isActionPending ||
+      isClearingSessions ||
+      syncingSessionId
+    ) {
+      return;
+    }
+
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        `Se enviarán ${recoveredSession.chunks.length} fragmentos guardados a Cloudflare para transcripción. Como la sesión fue recuperada, podría faltar audio que no alcanzó a guardarse. ¿Deseas continuar?`
+      );
+    if (!confirmed) {
+      return;
+    }
+
+    setSyncingSessionId(recoveredSession.sessionId);
+    setActionError(null);
+    try {
+      const result = await syncPendingAudioSession(recoveredSession.sessionId);
+      setSyncedTranscripts((current) => [
+        { sessionId: result.sessionId, transcript: result.transcript },
+        ...current.filter((item) => item.sessionId !== result.sessionId),
+      ]);
+      await recover();
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo sincronizar la sesión."
+      );
+    } finally {
+      setSyncingSessionId(null);
     }
   };
 
@@ -153,8 +201,9 @@ function App() {
             isRecording ||
             isRecovering ||
             isActionPending ||
-            isClearingSessions
-          }
+            isClearingSessions ||
+            syncingSessionId
+            }
         >
           {isClearingSessions
             ? "Limpiando sesiones..."
@@ -191,8 +240,44 @@ function App() {
               Se encontraron {recoveredSessions.length} sesión
               {recoveredSessions.length === 1 ? "" : "es"} pendiente
               {recoveredSessions.length === 1 ? "" : "s"}. No se enviará sin
-              revisión.
+              tu confirmación. El envío inicia la transcripción en Cloudflare.
             </p>
+            <ul className="recovered-session-list">
+              {recoveredSessions.map((recoveredSession) => (
+                <li key={recoveredSession.sessionId}>
+                  <span>
+                    Sesión con {recoveredSession.chunks.length} fragmento
+                    {recoveredSession.chunks.length === 1 ? "" : "s"} guardado
+                    {recoveredSession.chunks.length === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    className="sync-session-button"
+                    type="button"
+                    onClick={() => handleSyncSession(recoveredSession)}
+                    disabled={
+                      isRecording ||
+                      isRecovering ||
+                      isActionPending ||
+                      isClearingSessions ||
+                      syncingSessionId !== null
+                    }
+                  >
+                    {syncingSessionId === recoveredSession.sessionId
+                      ? "Enviando..."
+                      : "Revisar y Sincronizar"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {syncedTranscripts.length > 0 && (
+          <section className="transcript-note" aria-live="polite">
+            <h2>Transcripción recibida</h2>
+            {syncedTranscripts.map((item) => (
+              <p key={item.sessionId}>{item.transcript}</p>
+            ))}
           </section>
         )}
 

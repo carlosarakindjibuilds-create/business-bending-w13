@@ -3,6 +3,8 @@ import { emitSystemLog } from "./systemEventLogger";
 const DATABASE_NAME = "validator-of-the-trade";
 const DATABASE_VERSION = 1;
 const AUDIO_CHUNKS_STORE = "audioChunks";
+const MAX_SYNC_AUDIO_BYTES = 8 * 1024 * 1024;
+const WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
 
 let databasePromise;
 let recoveryPromise;
@@ -170,6 +172,160 @@ export async function clearAudioChunks() {
       reject(
         transaction.error ||
           new Error("Se abortó la transacción al limpiar IndexedDB.")
+      );
+    };
+  });
+}
+
+export async function syncPendingAudioSession(sessionId) {
+  if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+    throw new TypeError("Se requiere una sesión válida para sincronizar.");
+  }
+  if (!WORKER_URL) {
+    throw new Error(
+      "Falta configurar VITE_CLOUDFLARE_WORKER_URL para sincronizar audio."
+    );
+  }
+
+  let endpoint;
+  try {
+    endpoint = new URL(WORKER_URL);
+  } catch {
+    throw new Error("VITE_CLOUDFLARE_WORKER_URL no es una URL válida.");
+  }
+  if (endpoint.protocol !== "https:" && endpoint.hostname !== "localhost") {
+    throw new Error("El endpoint de sincronización debe usar HTTPS.");
+  }
+
+  const database = await openAudioDatabase();
+  const chunks = await readPendingSessionChunks(database, sessionId);
+  if (chunks.length === 0) {
+    throw new Error("No hay fragmentos pendientes para esta sesión.");
+  }
+
+  chunks.sort((left, right) => left.sequence - right.sequence);
+  for (let index = 1; index < chunks.length; index += 1) {
+    if (chunks[index - 1].sequence === chunks[index].sequence) {
+      throw new Error("La sesión contiene secuencias de audio duplicadas.");
+    }
+  }
+
+  const mimeType = chunks[0].mimeType;
+  if (chunks.some((chunk) => chunk.mimeType !== mimeType)) {
+    throw new Error("La sesión contiene formatos de audio incompatibles.");
+  }
+
+  const audio = new Blob(
+    chunks.map((chunk) => chunk.audio),
+    { type: mimeType }
+  );
+  if (audio.size > MAX_SYNC_AUDIO_BYTES) {
+    throw new Error("La sesión excede el límite de 8 MiB del Cloudflare Worker.");
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": mimeType },
+    body: audio,
+    credentials: "omit",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cloudflare Worker respondió con HTTP ${response.status}.`);
+  }
+  emitSystemLog("EDGE_AI");
+
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error("Cloudflare Worker devolvió una respuesta JSON inválida.");
+  }
+  if (!result || typeof result.transcript !== "string" || !result.transcript.trim()) {
+    throw new Error("Cloudflare Worker no devolvió una transcripción válida.");
+  }
+
+  await markAudioChunksSynced(database, chunks);
+  return {
+    sessionId,
+    transcript: result.transcript,
+    wordCount: Number.isInteger(result.wordCount) ? result.wordCount : null,
+  };
+}
+
+function readPendingSessionChunks(database, sessionId) {
+  return new Promise((resolve, reject) => {
+    let transaction;
+    let chunks = [];
+
+    try {
+      transaction = database.transaction(AUDIO_CHUNKS_STORE, "readonly");
+      const request = transaction
+        .objectStore(AUDIO_CHUNKS_STORE)
+        .index("by_session_id")
+        .getAll(sessionId);
+
+      request.onsuccess = () => {
+        chunks = request.result.filter(
+          (chunk) => chunk && chunk.status === "pending_upload"
+        );
+        if (
+          chunks.some(
+            (chunk) =>
+              !(chunk.audio instanceof Blob) ||
+              chunk.audio.size === 0 ||
+              !Number.isInteger(chunk.sequence) ||
+              chunk.sequence < 0 ||
+              typeof chunk.mimeType !== "string"
+          )
+        ) {
+          reject(new Error("La sesión contiene fragmentos inválidos."));
+        }
+      };
+      request.onerror = () => {
+        reject(
+          request.error || new Error("No se pudieron leer los fragmentos de la sesión.")
+        );
+      };
+      transaction.oncomplete = () => resolve(chunks);
+      transaction.onerror = () => {
+        reject(transaction.error || new Error("Falló la lectura de IndexedDB."));
+      };
+      transaction.onabort = () => {
+        reject(transaction.error || new Error("Se abortó la lectura de IndexedDB."));
+      };
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function markAudioChunksSynced(database, chunks) {
+  return new Promise((resolve, reject) => {
+    let transaction;
+
+    try {
+      transaction = database.transaction(AUDIO_CHUNKS_STORE, "readwrite");
+      const store = transaction.objectStore(AUDIO_CHUNKS_STORE);
+      chunks.forEach((chunk) => {
+        store.put({ ...chunk, status: "synced", syncedAt: Date.now() });
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => {
+      reject(
+        transaction.error ||
+          new Error("Falló la actualización del estado sincronizado.")
+      );
+    };
+    transaction.onabort = () => {
+      reject(
+        transaction.error ||
+          new Error("Se abortó la actualización del estado sincronizado.")
       );
     };
   });
